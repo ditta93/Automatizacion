@@ -1,0 +1,70 @@
+from fastapi import FastAPI, HTTPException
+import logging
+import pyodbc
+
+# Configurar logs
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
+)
+
+app = FastAPI(
+    title="ERP Automation API",
+    description=(
+        "API REST para la integración de transacciones con SQL Server y Power"
+        " Platform"
+    ),
+    version="1.0.0",
+)
+
+
+def obtener_conexion():
+  try:
+    connection_string = (
+        "DRIVER={ODBC Driver 18 for SQL Server};"
+        "SERVER=127.0.0.1,1433;"
+        "DATABASE=erp_produccion;"
+        "UID=sa;"
+        "PWD=TuPasswordSeguro123!;"
+        "TrustServerCertificate=yes;"
+    )
+    return pyodbc.connect(connection_string)
+  except Exception as e:
+    logging.error(f"Error de conexión a la base de datos: {e}")
+    raise HTTPException(
+        status_code=500, detail="No se pudo conectar a la base de datos."
+    )
+
+
+@app.get("/")
+def raiz():
+  return {
+      "estado": "activo",
+      "mensaje": "Bienvenido a la API del ERP - Automatización con Python y SQL",
+  }
+
+
+@app.get("/transacciones-pendientes")
+def get_transacciones():
+  try:
+    logging.info(
+        "Consultando transacciones pendientes mediante procedimiento"
+        " almacenado..."
+    )
+    conexion = obtener_conexion()
+    cursor = conexion.cursor()
+
+    # Ejecutar el procedimiento almacenado
+    cursor.execute("EXEC sp_ObtenerTransaccionesPendientes")
+
+    # Obtener nombres de columnas y filas
+    columnas = [column[0] for column in cursor.description]
+    filas = [dict(zip(columnas, row)) for row in cursor.fetchall()]
+
+    conexion.close()
+
+    logging.info(f"Se retornaron {len(filas)} registros exitosamente.")
+    return {"status": "success", "total_registros": len(filas), "data": filas}
+
+  except Exception as e:
+    logging.error(f"Error al ejecutar el procedimiento almacenado: {e}")
+    raise HTTPException(status_code=500, detail=str(e))
