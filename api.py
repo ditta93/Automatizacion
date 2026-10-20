@@ -1,8 +1,12 @@
+from dotenv import load_dotenv
 from fastapi import FastAPI, Header, HTTPException, Query
 from fastapi.responses import HTMLResponse
 import logging
 import os
 import pyodbc
+
+# Cargar las variables del archivo .env
+load_dotenv()
 
 # Configurar logs básicos
 logging.basicConfig(
@@ -17,68 +21,43 @@ app = FastAPI(
 
 API_KEY_SECRETA = "MiTokenSecretoERP2026!"
 
+# Obtener la cadena de conexión desde las variables de entorno (.env)
+DB_CONNECTION_STRING = os.getenv("AZURE_SQL_CONNECTIONSTRING")
+
 
 def obtener_conexion():
   try:
-    connection_string = (
-        "DRIVER={ODBC Driver 18 for SQL Server};"
-        "SERVER=127.0.0.1,1433;"
-        "DATABASE=erp_produccion;"
-        "UID=sa;"
-        "PWD=TuPasswordSeguro123!;"
-        "TrustServerCertificate=yes;"
-    )
-    return pyodbc.connect(connection_string)
+    if not DB_CONNECTION_STRING:
+      raise ValueError("La cadena de conexión no está configurada en el .env")
+    conn = pyodbc.connect(DB_CONNECTION_STRING)
+    return conn
   except Exception as e:
-    logging.error(f"Error de conexión a la base de datos: {e}")
+    logging.error(f"Error al conectar a la base de datos: {e}")
     raise HTTPException(
-        status_code=500, detail="No se pudo conectar a la base de datos."
+        status_code=500, detail=f"No se pudo conectar a la base de datos: {e}"
     )
 
-
-# --- 1. RUTA PARA SERVIR EL PANEL VISUAL (FRONTEND) ---
 @app.get("/", response_class=HTMLResponse)
-def leer_interfaz():
-  ruta_html = "templates/index.html"
-  if os.path.exists(ruta_html):
-    with open(ruta_html, "r", encoding="utf-8") as f:
-      return f.read()
-  return (
-      "<h1>Error: No se encontró el archivo de la interfaz visual en"
-      " templates/index.html</h1>"
-  )
-
-
-# --- 2. ENDPOINT SEGURO DE TRANSACCIONES (API REST) ---
-@app.get("/transacciones-pendientes")
-def get_transacciones(
-    estado: str = Query(
-        "PENDIENTE", description="Filtro opcional por estado"
-    ),
-    api_key: str = Header(..., alias="x-api-key"),
-):
-  if api_key != API_KEY_SECRETA:
-    raise HTTPException(status_code=403, detail="API Key no autorizada.")
-
+def servir_panel():
   try:
-    logging.info("Consultando registros en SQL Server...")
-    conexion = obtener_conexion()
-    cursor = conexion.cursor()
+    # Lee el archivo index.html ubicado dentro de la carpeta templates
+    with open("templates/index.html", "r", encoding="utf-8") as f:
+      return f.read()
+  except FileNotFoundError:
+    return (
+        "<h3>Error: No se encontró el archivo index.html en la carpeta"
+        " templates/</h3>"
+    )
 
-    cursor.execute("EXEC sp_ObtenerTransaccionesPendientes")
-
-    columnas = [column[0] for column in cursor.description]
-    filas = [dict(zip(columnas, row)) for row in cursor.fetchall()]
-
-    conexion.close()
-
-    return {
-        "status": "success",
-        "filtro_aplicado": estado,
-        "total_registros": len(filas),
-        "data": filas,
-    }
-
-  except Exception as e:
-    logging.error(f"Error al procesar la consulta: {e}")
-    raise HTTPException(status_code=500, detail=str(e))
+# Ruta de prueba rápida para validar la conexión local
+@app.get("/test-db")
+def test_db():
+  conn = obtener_conexion()
+  cursor = conn.cursor()
+  cursor.execute("SELECT @@VERSION;")
+  db_version = cursor.fetchone()[0]
+  conn.close()
+  return {
+      "status": "Conexión local exitosa a Azure SQL con ODBC 18",
+      "version_sql": db_version,
+  }
